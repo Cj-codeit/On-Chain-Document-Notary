@@ -208,3 +208,80 @@
         verified: true,
         verification-level: verification-level
       })))))
+
+(define-read-only (get-document-info (document-hash (buff 32)))
+  (match (map-get? notarized-documents document-hash)
+    document
+    (some {
+      owner: (get owner document),
+      timestamp: (get timestamp document),
+      description: (get description document),
+      document-type: (get document-type document),
+      witness-count: (get witness-count document),
+      signatures-received: (get signatures-received document),
+      verified: (get verified document),
+      verification-level: (get verification-level document),
+      expired: (>= block-height (get expiry-height document)),
+      fee-paid: (get notary-fee document)
+    })
+    none))
+
+(define-read-only (get-document-witnesses (document-hash (buff 32)))
+  (match (map-get? notarized-documents document-hash)
+    document (some (get witnesses document))
+    none))
+
+(define-read-only (get-witness-signatures (document-hash (buff 32)))
+  (match (map-get? notarized-documents document-hash)
+    document (some (get witness-signatures document))
+    none))
+
+(define-read-only (get-user-document (user principal) (doc-id uint))
+  (map-get? user-documents {user: user, doc-id: doc-id}))
+
+(define-read-only (get-user-document-count (user principal))
+  (default-to u0 (map-get? user-doc-counter user)))
+
+(define-read-only (verify-document-authenticity (document-hash (buff 32)))
+  (let ((document (map-get? notarized-documents document-hash)))
+    (match document
+      doc-data
+      {
+        exists: true,
+        timestamp: (get timestamp doc-data),
+        owner: (get owner doc-data),
+        verified: (get verified doc-data),
+        verification-level: (get verification-level doc-data),
+        witness-count: (get witness-count doc-data),
+        signatures-received: (get signatures-received doc-data),
+        expired: (>= block-height (get expiry-height doc-data)),
+        document-type: (get document-type doc-data)
+      }
+      {
+        exists: false,
+        timestamp: u0,
+        owner: 'SP000000000000000000002Q6VF78,
+        verified: false,
+        verification-level: u0,
+        witness-count: u0,
+        signatures-received: u0,
+        expired: true,
+        document-type: u0
+      })))
+
+(define-read-only (get-contract-stats)
+  {
+    total-documents: (var-get total-documents-notarized),
+    base-fee: (var-get base-notary-fee),
+    witness-fee: (var-get witness-fee),
+    verification-fee: (var-get verification-fee),
+    contract-active: (var-get contract-active),
+    emergency-pause: (var-get emergency-pause)
+  })
+
+(define-read-only (calculate-notarization-cost 
+  (document-type uint) 
+  (witness-count uint))
+  (let ((type-multiplier (get-type-fee-multiplier document-type)))
+    (+ (* (var-get base-notary-fee) type-multiplier)
+       (* (var-get witness-fee) witness-count))))
