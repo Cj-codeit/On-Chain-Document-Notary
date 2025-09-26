@@ -285,3 +285,92 @@
   (let ((type-multiplier (get-type-fee-multiplier document-type)))
     (+ (* (var-get base-notary-fee) type-multiplier)
        (* (var-get witness-fee) witness-count))))
+
+
+(define-public (add-authorized-notary (notary principal))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (ok (map-set authorized-notaries notary {
+      active: true,
+      total-notarizations: u0,
+      reputation-score: u100,
+      join-date: block-height
+    }))))
+
+(define-public (remove-authorized-notary (notary principal))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (ok (map-delete authorized-notaries notary))))
+
+(define-public (update-fees 
+  (new-base-fee uint) 
+  (new-witness-fee uint) 
+  (new-verification-fee uint))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (> new-base-fee u0) err-invalid-fee)
+    (asserts! (> new-witness-fee u0) err-invalid-fee)
+    (asserts! (> new-verification-fee u0) err-invalid-fee)
+    
+    (var-set base-notary-fee new-base-fee)
+    (var-set witness-fee new-witness-fee)
+    (var-set verification-fee new-verification-fee)
+    (ok true)))
+
+(define-public (emergency-pause-contract)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (var-set emergency-pause true)
+    (ok true)))
+
+(define-public (resume-contract)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (var-set emergency-pause false)
+    (ok true)))
+
+(define-public (withdraw-earnings (amount uint))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (let ((current-earnings (default-to u0 (map-get? notary-earnings contract-owner))))
+      (asserts! (>= current-earnings amount) err-insufficient-funds)
+      (map-set notary-earnings contract-owner (- current-earnings amount))
+      (stx-transfer? amount (as-contract tx-sender) tx-sender))))
+
+(define-public (log-document-access (document-hash (buff 32)))
+  (let ((caller tx-sender)
+        (current-log (default-to {access-count: u0, last-access: u0}
+                                (map-get? document-access-log 
+                                         {document-hash: document-hash, accessor: caller}))))
+    (ok (map-set document-access-log 
+                 {document-hash: document-hash, accessor: caller}
+                 {
+                   access-count: (+ (get access-count current-log) u1),
+                   last-access: block-height
+                 }))))
+
+;; Private helper functions
+(define-private (get-type-fee-multiplier (doc-type uint))
+  (if (is-eq doc-type doc-type-legal) u3
+  (if (is-eq doc-type doc-type-financial) u2
+  (if (is-eq doc-type doc-type-medical) u2
+  (if (is-eq doc-type doc-type-academic) u1
+  (if (is-eq doc-type doc-type-business) u2
+      u1)))))) ;; personal and default
+
+(define-private (register-witness-entry (witness principal))
+  (let ((current-witness (default-to {total-witnessed: u0, reputation: u100, active: true}
+                                    (map-get? witness-registry witness))))
+    (map-set witness-registry witness
+             (merge current-witness {active: true}))
+    witness))
+
+(define-private (update-witness-stats (witness principal))
+  (let ((current-stats (default-to {total-witnessed: u0, reputation: u100, active: true}
+                                  (map-get? witness-registry witness))))
+    (map-set witness-registry witness
+             {
+               total-witnessed: (+ (get total-witnessed current-stats) u1),
+               reputation: (min (+ (get reputation current-stats) u1) u1000),
+               active: true
+             })))
