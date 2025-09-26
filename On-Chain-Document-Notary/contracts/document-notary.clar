@@ -107,7 +107,7 @@
         (total-fee (+ (* (var-get base-notary-fee) type-multiplier) 
                      (* (var-get witness-fee) witness-count)))
         (doc-id (default-to u0 (map-get? user-doc-counter caller)))
-        (expiry-height (+ block-height expiry-blocks)))
+        (expiry-height (+ stacks-block-height expiry-blocks)))
     
     ;; Validation checks
     (asserts! (var-get contract-active) err-unauthorized)
@@ -128,7 +128,7 @@
       (map-set notarized-documents document-hash {
         owner: caller,
         document-hash: document-hash,
-        timestamp: block-height,
+        timestamp: stacks-block-height,
         description: description,
         document-type: document-type,
         witnesses: witnesses,
@@ -155,7 +155,7 @@
     (var-set total-documents-notarized (+ (var-get total-documents-notarized) u1))
     
     ;; Initialize witness registry entries
-    (map witnesses register-witness-entry)
+    (map register-witness-entry witnesses)
     
     (ok document-hash)))
 
@@ -166,7 +166,7 @@
         (document (unwrap! (map-get? notarized-documents document-hash) err-not-found)))
     
     ;; Validation
-    (asserts! (< block-height (get expiry-height document)) err-document-expired)
+    (asserts! (< stacks-block-height (get expiry-height document)) err-document-expired)
     (asserts! (is-some (index-of (get witnesses document) caller)) err-invalid-witness)
     
     ;; Check if witness already signed
@@ -176,7 +176,7 @@
                 err-witness-already-signed)
       
       ;; Update signature status
-      (let ((updated-sigs (replace-at current-sigs witness-index true))
+      (let ((updated-sigs (update-signature-at current-sigs witness-index))
             (new-sig-count (+ (get signatures-received document) u1)))
         
         (map-set notarized-documents document-hash
@@ -197,7 +197,7 @@
   (let ((document (unwrap! (map-get? notarized-documents document-hash) err-not-found)))
     (asserts! (or (is-eq tx-sender contract-owner)
                   (is-some (map-get? authorized-notaries tx-sender))) err-unauthorized)
-    (asserts! (< block-height (get expiry-height document)) err-document-expired)
+    (asserts! (< stacks-block-height (get expiry-height document)) err-document-expired)
     (asserts! (<= verification-level u3) err-not-found)
     
     ;; Charge verification fee
@@ -221,7 +221,7 @@
       signatures-received: (get signatures-received document),
       verified: (get verified document),
       verification-level: (get verification-level document),
-      expired: (>= block-height (get expiry-height document)),
+      expired: (>= stacks-block-height (get expiry-height document)),
       fee-paid: (get notary-fee document)
     })
     none))
@@ -254,7 +254,7 @@
         verification-level: (get verification-level doc-data),
         witness-count: (get witness-count doc-data),
         signatures-received: (get signatures-received doc-data),
-        expired: (>= block-height (get expiry-height doc-data)),
+        expired: (>= stacks-block-height (get expiry-height doc-data)),
         document-type: (get document-type doc-data)
       }
       {
@@ -286,7 +286,6 @@
     (+ (* (var-get base-notary-fee) type-multiplier)
        (* (var-get witness-fee) witness-count))))
 
-
 (define-public (add-authorized-notary (notary principal))
   (begin
     (asserts! (is-eq tx-sender contract-owner) err-owner-only)
@@ -294,7 +293,7 @@
       active: true,
       total-notarizations: u0,
       reputation-score: u100,
-      join-date: block-height
+      join-date: stacks-block-height
     }))))
 
 (define-public (remove-authorized-notary (notary principal))
@@ -346,7 +345,7 @@
                  {document-hash: document-hash, accessor: caller}
                  {
                    access-count: (+ (get access-count current-log) u1),
-                   last-access: block-height
+                   last-access: stacks-block-height
                  }))))
 
 ;; Private helper functions
@@ -358,6 +357,19 @@
   (if (is-eq doc-type doc-type-business) u2
       u1)))))) ;; personal and default
 
+(define-private (update-signature-at (signatures (list 10 bool)) (index uint))
+  (list 
+    (if (is-eq index u0) true (unwrap-panic (element-at signatures u0)))
+    (if (is-eq index u1) true (unwrap-panic (element-at signatures u1)))
+    (if (is-eq index u2) true (unwrap-panic (element-at signatures u2)))
+    (if (is-eq index u3) true (unwrap-panic (element-at signatures u3)))
+    (if (is-eq index u4) true (unwrap-panic (element-at signatures u4)))
+    (if (is-eq index u5) true (unwrap-panic (element-at signatures u5)))
+    (if (is-eq index u6) true (unwrap-panic (element-at signatures u6)))
+    (if (is-eq index u7) true (unwrap-panic (element-at signatures u7)))
+    (if (is-eq index u8) true (unwrap-panic (element-at signatures u8)))
+    (if (is-eq index u9) true (unwrap-panic (element-at signatures u9)))))
+
 (define-private (register-witness-entry (witness principal))
   (let ((current-witness (default-to {total-witnessed: u0, reputation: u100, active: true}
                                     (map-get? witness-registry witness))))
@@ -367,10 +379,11 @@
 
 (define-private (update-witness-stats (witness principal))
   (let ((current-stats (default-to {total-witnessed: u0, reputation: u100, active: true}
-                                  (map-get? witness-registry witness))))
+                                  (map-get? witness-registry witness)))
+        (new-reputation (+ (get reputation current-stats) u1)))
     (map-set witness-registry witness
              {
                total-witnessed: (+ (get total-witnessed current-stats) u1),
-               reputation: (min (+ (get reputation current-stats) u1) u1000),
+               reputation: (if (> new-reputation u1000) u1000 new-reputation),
                active: true
              })))
